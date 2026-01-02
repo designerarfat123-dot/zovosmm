@@ -1,0 +1,294 @@
+<!doctype html><html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="stylesheet" href="simple.css">
+<script src="config.js"></script>
+<script src="app.js"></script><title>User Panel</title></head><body>
+
+<div class="topbar"><div class="inner">
+  <div class="flex">
+    <button id="btnMenu" type="button">☰</button>
+    <div class="brand">Your Panel</div>
+  </div>
+  <div class="flex">
+    <span id="me" class="badge">…</span>
+    <button id="btnLogout" type="button">Logout</button>
+  </div>
+</div></div>
+
+<div class="overlay" id="overlay"></div>
+<div class="navwrap">
+  <div class="sidebar" id="sidebar">
+    <a href="#" data-page="newOrder" class="active">New Order</a>
+    <a href="#" data-page="orders">Orders</a>
+    <a href="#" data-page="addFunds">Add Funds</a>
+    <a href="#" data-page="services">Services</a>
+  </div>
+  <div class="main">
+    <div id="page"></div>
+  </div>
+</div>
+<div id="toast" class="toast"></div>
+<script>
+
+(async function(){
+  await App.loadPublicTheme();
+  const ok = await App.guardUser();
+  if(!ok) return;
+
+  const user = App.getUser();
+  qs("#me").textContent = user.email + " (" + user.balance + ")";
+  qs("#btnLogout").addEventListener("click", ()=>{ App.clearToken(); location.href="login.html"; });
+
+  const sidebar = qs("#sidebar"), overlay=qs("#overlay");
+  qs("#btnMenu").addEventListener("click", ()=>{ sidebar.classList.add("open"); overlay.classList.add("show"); });
+  overlay.addEventListener("click", ()=>{ sidebar.classList.remove("open"); overlay.classList.remove("show"); });
+
+  async function refreshMe(){
+    const me = await App.api("/api/me");
+    App.setUser(me.user);
+    qs("#me").textContent = me.user.email + " (" + me.user.balance + ")";
+  }
+
+  function setActive(page){
+    qsa(".sidebar a").forEach(a=>a.classList.toggle("active", a.dataset.page===page));
+  }
+  qsa(".sidebar a").forEach(a=>a.addEventListener("click",(e)=>{
+    e.preventDefault();
+    const page = a.dataset.page;
+    navigate(page);
+    sidebar.classList.remove("open"); overlay.classList.remove("show");
+  }));
+
+  async function navigate(page){
+    setActive(page);
+    if(page==="newOrder") return renderNewOrder();
+    if(page==="orders") return renderOrders();
+    if(page==="addFunds") return renderAddFunds();
+    if(page==="services") return renderServices();
+  }
+
+  async function renderNewOrder(){
+    qs("#page").innerHTML = `
+      <div class="h1">New Order</div>
+      <div class="card">
+        <div class="row">
+          <div class="col">
+            <label>Category</label>
+            <select id="cat"></select>
+          </div>
+          <div class="col">
+            <label>Service</label>
+            <select id="svc"></select>
+          </div>
+        </div>
+        <div class="row" style="margin-top:.75rem;">
+          <div class="col">
+            <label>Link</label>
+            <input id="link" placeholder="https://..." />
+          </div>
+          <div class="col">
+            <label>Quantity</label>
+            <input id="qty" type="number" min="1" />
+          </div>
+        </div>
+        <div class="flex" style="margin-top:1rem;">
+          <button class="primary" id="btnOrder" type="button">Place Order</button>
+          <span class="small" id="hint"></span>
+        </div>
+      </div>
+    `;
+    const cats = await App.api("/api/categories");
+    const catSel = qs("#cat");
+    catSel.innerHTML = cats.categories.map(c=>`<option value="${c}">${c}</option>`).join("");
+    catSel.addEventListener("change", ()=>loadServices(catSel.value));
+    await loadServices(catSel.value);
+
+    async function loadServices(category){
+      const res = await App.api(`/api/services?category=${encodeURIComponent(category)}`);
+      const svcSel = qs("#svc");
+      svcSel.innerHTML = res.services.map(s=>`<option value="${s.id}" data-min="${s.min}" data-max="${s.max}" data-rate="${s.rate_per_1k}">${s.name}</option>`).join("");
+      updateHint();
+      svcSel.addEventListener("change", updateHint);
+    }
+    function updateHint(){
+      const opt = qs("#svc").selectedOptions[0];
+      if(!opt) return;
+      const min = opt.dataset.min, max = opt.dataset.max, rate = opt.dataset.rate;
+      qs("#hint").textContent = `Min ${min} / Max ${max} | Rate/1k ${rate}`;
+    }
+
+    qs("#btnOrder").addEventListener("click", async ()=>{
+      const btn = qs("#btnOrder"); const done = App.btnLoading(btn,"Placing...");
+      try{
+        const service_id = Number(qs("#svc").value);
+        const link = qs("#link").value.trim();
+        const quantity = Number(qs("#qty").value);
+        await App.api("/api/orders",{method:"POST", body:{service_id, link, quantity}});
+        App.toast("Order placed");
+        await refreshMe();
+        qs("#link").value=""; qs("#qty").value="";
+      }catch(e){ App.toast(e.message); }
+      finally{ done(); }
+    });
+  }
+
+  async function renderOrders(){
+    qs("#page").innerHTML = `
+      <div class="h1">Orders</div>
+
+      <div class="card">
+        <div class="row" style="justify-content:space-between;gap:.75rem;flex-wrap:wrap">
+          <div class="small muted">Refresh will fetch latest order statuses from provider (for recent pending/processing orders).</div>
+          <div class="row" style="gap:.6rem;flex-wrap:wrap">
+            <button id="btnRefreshOrders">Refresh status</button>
+            <button id="btnReloadOrders">Reload</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:1rem">
+        <div class="tablewrap">
+          <table>
+            <thead><tr>
+              <th>ID</th><th>Date</th><th>Service</th><th>Qty</th><th>Charge</th><th>Status</th>
+            </tr></thead>
+            <tbody id="orderRows"><tr><td colspan="6" class="small">Loading…</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    `;
+
+    async function load(sync=false){
+      const url = sync ? "/api/orders?sync=1" : "/api/orders";
+      const res = await App.api(url);
+      const rows = qs("#orderRows");
+      rows.innerHTML = (res.orders||[]).map(o=>`
+        <tr>
+          <td>${o.id}</td>
+          <td class="small">${o.created_at}</td>
+          <td>${escapeHtml(o.service_name||"")}</td>
+          <td>${o.quantity}</td>
+          <td>${o.charge}</td>
+          <td>${escapeHtml(o.status||"")}</td>
+        </tr>
+      `).join("") || `<tr><td colspan="6" class="small">No orders.</td></tr>`;
+    }
+
+    qs("#btnReloadOrders").addEventListener("click", ()=>load(false).catch(e=>toast(String(e.message||e))));
+    qs("#btnRefreshOrders").addEventListener("click", async (e)=>{
+      const done = App.btnLoading(e.target, "Refreshing...");
+      try{ await load(true); toast("Updated"); }catch(err){ toast(String(err.message||err)); }
+      done();
+    });
+
+    await load(false);
+  }
+
+  async function renderAddFunds(){
+    qs("#page").innerHTML = `
+      <div class="h1">Add Funds</div>
+      <div class="card">
+        <div class="row">
+          <div class="col">
+            <label>Method</label>
+            <select id="method">
+              <option>Easypaisa</option>
+              <option>JazzCash</option>
+              <option>Bank Transfer</option>
+            </select>
+          </div>
+          <div class="col">
+            <label>Amount</label>
+            <input id="amount" type="number" min="1" />
+          </div>
+        </div>
+        <div class="row" style="margin-top:.75rem;">
+          <div class="col">
+            <label>Transaction ID</label>
+            <input id="txn" />
+          </div>
+        </div>
+        <div class="flex" style="margin-top:1rem;">
+          <button class="primary" id="btnFunds" type="button">Submit</button>
+          <span class="small">Requests are manually approved by admin.</span>
+        </div>
+      </div>
+
+      <div class="h1" style="margin-top:1rem;">History</div>
+      <div class="tablewrap">
+        <table>
+          <thead><tr><th>ID</th><th>Date</th><th>Method</th><th>Amount</th><th>Txn</th><th>Status</th></tr></thead>
+          <tbody id="fundRows"><tr><td colspan="6" class="small">Loading…</td></tr></tbody>
+        </table>
+      </div>
+    `;
+    qs("#btnFunds").addEventListener("click", async ()=>{
+      const btn = qs("#btnFunds"); const done = App.btnLoading(btn,"Submitting...");
+      try{
+        const method = qs("#method").value;
+        const amount = Number(qs("#amount").value);
+        const txn_id = qs("#txn").value.trim();
+        await App.api("/api/funds",{method:"POST", body:{method, amount, txn_id}});
+        App.toast("Request submitted");
+        qs("#amount").value=""; qs("#txn").value="";
+        await renderFundsHistory();
+      }catch(e){ App.toast(e.message); }
+      finally{ done(); }
+    });
+    await renderFundsHistory();
+  }
+
+  async function renderFundsHistory(){
+    const res = await App.api("/api/funds");
+    const rows = qs("#fundRows");
+    rows.innerHTML = res.funds.map(f=>`
+      <tr>
+        <td>${f.id}</td>
+        <td class="small">${f.created_at}</td>
+        <td>${f.method}</td>
+        <td>${f.amount}</td>
+        <td>${f.txn_id}</td>
+        <td>${f.status}</td>
+      </tr>
+    `).join("") || `<tr><td colspan="6" class="small">No requests</td></tr>`;
+  }
+
+  async function renderServices(){
+    qs("#page").innerHTML = `
+      <div class="h1">Services</div>
+      <div class="card">
+        <div class="row">
+          <div class="col">
+            <label>Search</label>
+            <input id="s" placeholder="Type to search..." />
+          </div>
+        </div>
+      </div>
+      <div class="tablewrap" style="margin-top:1rem;">
+        <table>
+          <thead><tr><th>Category</th><th>Name</th><th>Rate/1k</th><th>Min</th><th>Max</th></tr></thead>
+          <tbody id="svcRows"><tr><td colspan="5" class="small">Loading…</td></tr></tbody>
+        </table>
+      </div>
+    `;
+    const all = await App.api("/api/services");
+    const rows = qs("#svcRows");
+    function render(list){
+      rows.innerHTML = list.map(s=>`
+        <tr><td>${s.category}</td><td>${s.name}</td><td>${s.rate_per_1k}</td><td>${s.min}</td><td>${s.max}</td></tr>
+      `).join("") || `<tr><td colspan="5" class="small">No services</td></tr>`;
+    }
+    render(all.services);
+    qs("#s").addEventListener("input", (e)=>{
+      const q = e.target.value.toLowerCase().trim();
+      if(!q) return render(all.services);
+      render(all.services.filter(s => (s.name+" "+s.category).toLowerCase().includes(q)));
+    });
+  }
+
+  await navigate("newOrder");
+})();
+
+</script>
+
+</body></html>

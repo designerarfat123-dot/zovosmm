@@ -1,0 +1,54 @@
+<!doctype html><html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="stylesheet" href="simple.css">
+<script src="config.js"></script>
+<script src="app.js"></script><title>Admin Login</title></head><body onload="App.loadPublicTheme()">
+
+<div class="topbar"><div class="inner">
+  <div class="brand">Your Panel</div>
+  <div class="small">Admin Login</div>
+</div></div>
+
+<div class="container">
+  <div class="card" style="max-width:520px;margin:2rem auto;">
+    <div class="h1">Admin Login</div>
+    <div class="row">
+      <div class="col" style="min-width:100%">
+        <label>Email</label>
+        <input id="email" type="email" autocomplete="email" />
+      </div>
+      <div class="col" style="min-width:100%">
+        <label>Password</label>
+        <input id="password" type="password" autocomplete="current-password" />
+      </div>
+    </div>
+    <div class="flex" style="margin-top:1rem;">
+      <button class="primary" id="btnLogin" type="button">Login</button>
+      <div class="right small"><a href="login.html">User login</a></div>
+    </div>
+    <div class="small" style="margin-top:.75rem;color:var(--muted);">
+      Admin role is managed in the database (users.role = admin).
+    </div>
+  </div>
+</div>
+<div id="toast" class="toast"></div>
+<script>
+qs("#btnLogin").addEventListener("click", async ()=>{
+  const btn = qs("#btnLogin"); const done = App.btnLoading(btn, "Logging in...");
+  try{
+    const email = qs("#email").value.trim();
+    const password = qs("#password").value;
+    const j = await App.api("/api/auth/login",{method:"POST", auth:false, body:{email,password}});
+    App.setToken(j.token);
+    App.setUser(j.user);
+    if(String(j.user.role||"").toLowerCase()!=="admin"){
+      App.clearToken();
+      throw new Error("Not an admin account");
+    }
+    location.href="admin.html";
+  }catch(e){ App.toast(e.message); }
+  finally{ done(); }
+});
+</script>
+
+</body></html>

@@ -1,0 +1,732 @@
+<!doctype html><html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="stylesheet" href="simple.css">
+<script src="config.js"></script>
+<script src="app.js"></script><title>Admin</title></head><body>
+
+<div class="topbar"><div class="inner">
+  <div class="flex">
+    <button id="btnMenu" type="button">☰</button>
+    <div class="brand">Admin</div>
+  </div>
+  <div class="flex">
+    <span id="me" class="badge">…</span>
+    <button id="btnLogout" type="button">Logout</button>
+  </div>
+</div></div>
+
+<div class="overlay" id="overlay"></div>
+<div class="navwrap">
+  <div class="sidebar" id="sidebar">
+    <a href="#" data-page="dashboard" class="active">Dashboard</a>
+    <a href="#" data-page="orders">Orders</a>
+    <a href="#" data-page="users">Users</a>
+    <a href="#" data-page="services">Services</a>
+    <a href="#" data-page="categories">Categories</a>
+    <a href="#" data-page="reports">Reports</a>
+    <a href="#" data-page="payments">Payments</a>
+    <a href="#" data-page="appearance">Appearance</a>
+    <a href="#" data-page="password">Password</a>
+    <a href="#" data-page="setapi">Set API</a>
+  </div>
+  <div class="main">
+    <div id="page"></div>
+  </div>
+</div>
+<div id="toast" class="toast"></div>
+<script>
+
+(async function(){
+  await App.loadPublicTheme();
+  const ok = await App.guardAdmin();
+  if(!ok) return;
+
+  const user = App.getUser();
+  qs("#me").textContent = user.email;
+  qs("#btnLogout").addEventListener("click", ()=>{ App.clearToken(); location.href="admin-login.html"; });
+
+  const sidebar = qs("#sidebar"), overlay=qs("#overlay");
+  qs("#btnMenu").addEventListener("click", ()=>{ sidebar.classList.add("open"); overlay.classList.add("show"); });
+  overlay.addEventListener("click", ()=>{ sidebar.classList.remove("open"); overlay.classList.remove("show"); });
+
+  function setActive(page){
+    qsa(".sidebar a").forEach(a=>a.classList.toggle("active", a.dataset.page===page));
+  }
+  qsa(".sidebar a").forEach(a=>a.addEventListener("click",(e)=>{
+    e.preventDefault();
+    const page = a.dataset.page;
+    navigate(page);
+    sidebar.classList.remove("open"); overlay.classList.remove("show");
+  }));
+
+  async function navigate(page){
+    setActive(page);
+    if(page==="dashboard") return renderDashboard();
+    if(page==="orders") return renderOrders();
+    if(page==="users") return renderUsers();
+    if(page==="services") return renderServices();
+    if(page==="categories") return renderCategories();
+    if(page==="reports") return renderReports();
+    if(page==="payments") return renderPayments();
+    if(page==="appearance") return renderAppearance();
+    if(page==="password") return renderPassword();
+    if(page==="setapi") return renderSetApi();
+  }
+
+  async function renderDashboard(){
+    qs("#page").innerHTML = `<div class="h1">Dashboard</div><div class="card">Loading…</div>`;
+    const res = await App.api("/api/admin/summary");
+    qs("#page").innerHTML = `
+      <div class="h1">Dashboard</div>
+      <div class="row">
+        <div class="col"><div class="card"><div class="small">Users</div><div class="h1">${res.summary.users}</div></div></div>
+        <div class="col"><div class="card"><div class="small">Orders</div><div class="h1">${res.summary.orders}</div></div></div>
+        <div class="col"><div class="card"><div class="small">Pending Payments</div><div class="h1">${res.summary.pendingPayments}</div></div></div>
+        <div class="col"><div class="card"><div class="small">Services</div><div class="h1">${res.summary.services}</div></div></div>
+      </div>
+    `;
+  }
+
+  async function renderOrders(){
+    qs("#page").innerHTML = `
+      <div class="h1">Orders</div>
+      <div class="tablewrap"><table>
+        <thead><tr><th>ID</th><th>Date</th><th>User</th><th>Service</th><th>Qty</th><th>Charge</th><th>Status</th><th>Provider</th></tr></thead>
+        <tbody id="rows"><tr><td colspan="8" class="small">Loading…</td></tr></tbody>
+      </table></div>
+    `;
+    const res = await App.api("/api/admin/orders");
+    qs("#rows").innerHTML = res.orders.map(o=>`
+      <tr><td>${o.id}</td><td class="small">${o.created_at}</td><td>${o.user_email}</td><td>${o.service_name}</td><td>${o.quantity}</td><td>${o.charge}</td><td>${o.status}</td><td>${o.provider_order_id||""}</td></tr>
+    `).join("") || `<tr><td colspan="8" class="small">No orders</td></tr>`;
+  }
+
+  async function renderUsers(){
+    qs("#page").innerHTML = `
+      <div class="h1">Users</div>
+      <div class="card">
+        <div class="small">Adjust Balance (use + for add, - for deduct)</div>
+        <div class="row" style="margin-top:.5rem;">
+          <div class="col">
+            <label>User ID</label>
+            <input id="uid" type="number" />
+          </div>
+          <div class="col">
+            <label>Delta</label>
+            <input id="delta" type="number" step="0.01" />
+          </div>
+        </div>
+        <div class="flex" style="margin-top:.75rem;">
+          <button class="primary" id="btnAdj" type="button">Apply</button>
+        </div>
+      </div>
+      <div class="tablewrap" style="margin-top:1rem;"><table>
+        <thead><tr><th>ID</th><th>Email</th><th>Role</th><th>Balance</th><th>Created</th></tr></thead>
+        <tbody id="rows"><tr><td colspan="5" class="small">Loading…</td></tr></tbody>
+      </table></div>
+    `;
+    qs("#btnAdj").addEventListener("click", async ()=>{
+      const btn = qs("#btnAdj"); const done = App.btnLoading(btn, "Saving...");
+      try{
+        const user_id = Number(qs("#uid").value);
+        const delta = Number(qs("#delta").value);
+        await App.api("/api/admin/users/balance",{method:"POST", body:{user_id, delta}});
+        App.toast("Balance updated");
+        await renderUsers();
+      }catch(e){ App.toast(e.message); }
+      finally{ done(); }
+    });
+    const res = await App.api("/api/admin/users");
+    qs("#rows").innerHTML = res.users.map(u=>`
+      <tr><td>${u.id}</td><td>${u.email}</td><td>${u.role}</td><td>${u.balance}</td><td class="small">${u.created_at}</td></tr>
+    `).join("") || `<tr><td colspan="5" class="small">No users</td></tr>`;
+  }
+
+  async function renderServices(){
+    qs("#page").innerHTML = `
+      <div class="h1">Services</div>
+
+      <div class="card">
+        <div class="h2">Import from provider</div>
+        <div class="small muted">Fetches the latest list from your provider and stores it in your database.</div>
+        <div class="row" style="margin-top:.6rem;gap:.6rem;flex-wrap:wrap">
+          <button class="primary" id="btnImport">Import / Refresh</button>
+          <button id="btnTestProvider">Test Provider</button>
+        </div>
+        <div class="small muted" id="importMsg" style="margin-top:.5rem"></div>
+      </div>
+
+      <div class="card" style="margin-top:1rem">
+        <div class="h2">Add custom service</div>
+        <div class="row" style="gap:.6rem;flex-wrap:wrap">
+          <div style="min-width:220px">
+            <label>Category</label>
+            <select id="newSvcCat"></select>
+          </div>
+          <div style="min-width:260px;flex:1">
+            <label>Name</label>
+            <input id="newSvcName" placeholder="Service name">
+          </div>
+          <div style="min-width:140px">
+            <label>Rate / 1k</label>
+            <input id="newSvcRate" type="number" step="0.0001" placeholder="0.0000">
+          </div>
+          <div style="min-width:110px">
+            <label>Min</label>
+            <input id="newSvcMin" type="number" step="1" placeholder="1">
+          </div>
+          <div style="min-width:110px">
+            <label>Max</label>
+            <input id="newSvcMax" type="number" step="1" placeholder="1000">
+          </div>
+        </div>
+        <div class="row" style="margin-top:.6rem;gap:.6rem;flex-wrap:wrap">
+          <button class="primary" id="btnAddSvc">Add Service</button>
+          <div class="small muted" id="addMsg"></div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:1rem">
+        <div class="row" style="justify-content:space-between;gap:.75rem;flex-wrap:wrap">
+          <div class="h2" style="margin:0">Manage services</div>
+          <button id="btnReloadServices">Reload</button>
+        </div>
+        <div class="tablewrap" style="margin-top:.6rem">
+          <table>
+            <thead><tr>
+              <th>ID</th>
+              <th style="min-width:180px">Category</th>
+              <th style="min-width:320px">Name</th>
+              <th>Rate/1k</th>
+              <th>Min</th>
+              <th>Max</th>
+              <th>Status</th>
+              <th class="hide-sm">Provider</th>
+              <th class="hide-sm">Provider SID</th>
+              <th>Actions</th>
+            </tr></thead>
+            <tbody id="svcRows"><tr><td colspan="10" class="small">Loading…</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    `;
+
+    const btnImport = qs("#btnImport");
+    const btnTest = qs("#btnTestProvider");
+    const importMsg = qs("#importMsg");
+
+    async function load(){
+      const res = await App.api("/api/admin/services");
+      const cats = (res.categories||[]).filter(c=>!c.is_hidden).map(c=>c.name);
+      const catSelect = qs("#newSvcCat");
+      catSelect.innerHTML = ["Uncategorized", ...cats.filter(c=>c!=="Uncategorized")].map(c=>`<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join("");
+
+      const rows = qs("#svcRows");
+      rows.innerHTML = (res.services||[]).map(s=>{
+        const options = ["Uncategorized", ...cats.filter(c=>c!=="Uncategorized"), s.category]
+          .filter((v,i,a)=>v && a.indexOf(v)===i)
+          .map(c=>`<option value="${escapeHtml(c)}" ${c===s.category?'selected':''}>${escapeHtml(c)}</option>`).join("");
+        return `
+          <tr data-id="${s.id}">
+            <td>${s.id}</td>
+            <td><select class="svcCat">${options}</select></td>
+            <td><input class="svcName" value="${escapeAttr(s.name)}"></td>
+            <td><input class="svcRate" type="number" step="0.0001" value="${s.rate_per_1k}"></td>
+            <td><input class="svcMin" type="number" step="1" value="${s.min}"></td>
+            <td><input class="svcMax" type="number" step="1" value="${s.max}"></td>
+            <td>
+              <select class="svcStatus">
+                <option value="active" ${s.status==='active'?'selected':''}>active</option>
+                <option value="inactive" ${s.status==='inactive'?'selected':''}>inactive</option>
+              </select>
+            </td>
+            <td class="hide-sm">${escapeHtml(s.provider||'')}</td>
+            <td class="hide-sm">${escapeHtml(s.provider_service_id||'')}</td>
+            <td class="row" style="gap:.35rem;justify-content:flex-end;flex-wrap:wrap">
+              <button class="primary btnSaveSvc">Save</button>
+              <button class="danger btnDelSvc">Delete</button>
+            </td>
+          </tr>
+        `;
+      }).join("") || `<tr><td colspan="10" class="small">No services.</td></tr>`;
+
+      qsa(".btnSaveSvc").forEach(btn=>btn.addEventListener("click", async (e)=>{
+        const tr = e.target.closest("tr");
+        const id = tr.dataset.id;
+        const payload = {
+          category: qs(".svcCat", tr).value,
+          name: qs(".svcName", tr).value,
+          rate_per_1k: Number(qs(".svcRate", tr).value),
+          min: Number(qs(".svcMin", tr).value),
+          max: Number(qs(".svcMax", tr).value),
+          status: qs(".svcStatus", tr).value,
+        };
+        const done = App.btnLoading(e.target, "Saving...");
+        try{
+          await App.api(`/api/admin/services/${id}`, { method:"PUT", body: payload });
+          toast("Saved");
+        }catch(err){ toast(String(err.message||err)); }
+        done();
+      }));
+
+      qsa(".btnDelSvc").forEach(btn=>btn.addEventListener("click", async (e)=>{
+        const tr = e.target.closest("tr");
+        const id = tr.dataset.id;
+        if(!confirm("Delete this service?")) return;
+        const done = App.btnLoading(e.target, "Deleting...");
+        try{
+          await App.api(`/api/admin/services/${id}`, { method:"DELETE" });
+          tr.remove();
+          toast("Deleted");
+        }catch(err){ toast(String(err.message||err)); }
+        done();
+      }));
+    }
+
+    qs("#btnReloadServices").addEventListener("click", ()=>load());
+
+    btnImport.addEventListener("click", async ()=>{
+      const done = App.btnLoading(btnImport, "Importing...");
+      importMsg.textContent = "";
+      try{
+        await App.api("/api/admin/services/import", { method:"POST" });
+        importMsg.textContent = "Import completed.";
+        await load();
+      }catch(err){
+        importMsg.textContent = String(err.message||err);
+      }
+      done();
+    });
+
+    btnTest.addEventListener("click", async ()=>{
+      const done = App.btnLoading(btnTest, "Testing...");
+      importMsg.textContent = "";
+      try{
+        await App.api("/api/admin/provider/test");
+        importMsg.textContent = "Provider OK. Balance response received.";
+      }catch(err){
+        importMsg.textContent = String(err.message||err);
+      }
+      done();
+    });
+
+    qs("#btnAddSvc").addEventListener("click", async (e)=>{
+      const done = App.btnLoading(qs("#btnAddSvc"), "Adding...");
+      const payload = {
+        category: qs("#newSvcCat").value,
+        name: qs("#newSvcName").value,
+        rate_per_1k: Number(qs("#newSvcRate").value),
+        min: Number(qs("#newSvcMin").value),
+        max: Number(qs("#newSvcMax").value),
+      };
+      const addMsg = qs("#addMsg");
+      addMsg.textContent = "";
+      try{
+        await App.api("/api/admin/services", { method:"POST", body: payload });
+        addMsg.textContent = "Added.";
+        qs("#newSvcName").value = "";
+        await load();
+      }catch(err){
+        addMsg.textContent = String(err.message||err);
+      }
+      done();
+    });
+
+    await load();
+  }
+
+  async function renderCategories(){
+    qs("#page").innerHTML = `
+      <div class="h1">Categories</div>
+
+      <div class="card">
+        <div class="h2">Create category</div>
+        <div class="row" style="gap:.6rem;flex-wrap:wrap">
+          <input id="catName" placeholder="Category name" style="min-width:260px">
+          <button class="primary" id="btnAddCat">Create</button>
+          <div class="small muted" id="catMsg"></div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:1rem">
+        <div class="row" style="justify-content:space-between;gap:.75rem;flex-wrap:wrap">
+          <div class="h2" style="margin:0">Manage categories</div>
+          <button id="btnReloadCats">Reload</button>
+        </div>
+        <div class="small muted" style="margin-top:.35rem">Use ▲/▼ to arrange order. Hide removes it from the user category list.</div>
+
+        <div class="tablewrap" style="margin-top:.6rem">
+          <table>
+            <thead><tr>
+              <th style="width:90px">Order</th>
+              <th style="min-width:260px">Name</th>
+              <th>Hide</th>
+              <th style="min-width:220px">Reassign on delete</th>
+              <th>Actions</th>
+            </tr></thead>
+            <tbody id="catRows"><tr><td colspan="5" class="small">Loading…</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    `;
+
+    async function load(){
+      const res = await App.api("/api/admin/categories");
+      const cats = res.categories||[];
+      const rows = qs("#catRows");
+      rows.innerHTML = cats.map((c, idx)=>{
+        const options = ["", ...cats.filter(x=>x.id!==c.id).map(x=>x.name)].map(n=>`<option value="${escapeHtml(n)}">${n?escapeHtml(n):"— none —"}</option>`).join("");
+        return `
+          <tr data-id="${c.id}">
+            <td class="row" style="gap:.25rem;flex-wrap:wrap">
+              <button class="btnUp" ${idx===0?'disabled':''}>▲</button>
+              <button class="btnDown" ${idx===cats.length-1?'disabled':''}>▼</button>
+            </td>
+            <td><input class="catName" value="${escapeAttr(c.name)}"></td>
+            <td style="text-align:center"><input type="checkbox" class="catHide" ${c.is_hidden? 'checked':''}></td>
+            <td><select class="catReassign">${options}</select></td>
+            <td class="row" style="gap:.35rem;justify-content:flex-end;flex-wrap:wrap">
+              <button class="primary btnSaveCat">Save</button>
+              <button class="danger btnDelCat">Delete</button>
+            </td>
+          </tr>
+        `;
+      }).join("") || `<tr><td colspan="5" class="small">No categories.</td></tr>`;
+
+      qsa(".btnUp").forEach((b)=>b.addEventListener("click", async (e)=>{
+        const tr = e.target.closest("tr");
+        const id = Number(tr.dataset.id);
+        const done = App.btnLoading(e.target, "...");
+        try{ await App.api("/api/admin/categories/move", { method:"POST", body:{ id, dir:"up" } }); await load(); }
+        catch(err){ toast(String(err.message||err)); }
+        done();
+      }));
+      qsa(".btnDown").forEach((b)=>b.addEventListener("click", async (e)=>{
+        const tr = e.target.closest("tr");
+        const id = Number(tr.dataset.id);
+        const done = App.btnLoading(e.target, "...");
+        try{ await App.api("/api/admin/categories/move", { method:"POST", body:{ id, dir:"down" } }); await load(); }
+        catch(err){ toast(String(err.message||err)); }
+        done();
+      }));
+      qsa(".btnSaveCat").forEach((b)=>b.addEventListener("click", async (e)=>{
+        const tr = e.target.closest("tr");
+        const id = Number(tr.dataset.id);
+        const payload = { name: qs(".catName", tr).value, is_hidden: qs(".catHide", tr).checked };
+        const done = App.btnLoading(e.target, "Saving...");
+        try{ await App.api(`/api/admin/categories/${id}`, { method:"PUT", body: payload }); toast("Saved"); }
+        catch(err){ toast(String(err.message||err)); }
+        done();
+      }));
+      qsa(".btnDelCat").forEach((b)=>b.addEventListener("click", async (e)=>{
+        const tr = e.target.closest("tr");
+        const id = Number(tr.dataset.id);
+        const reassign_to = qs(".catReassign", tr).value;
+        if(!confirm("Delete this category?")) return;
+        const done = App.btnLoading(e.target, "Deleting...");
+        try{
+          await App.api(`/api/admin/categories/${id}`, { method:"DELETE", body: { reassign_to } });
+          toast("Deleted");
+          await load();
+        }catch(err){ toast(String(err.message||err)); }
+        done();
+      }));
+    }
+
+    qs("#btnReloadCats").addEventListener("click", ()=>load());
+    qs("#btnAddCat").addEventListener("click", async ()=>{
+      const done = App.btnLoading(qs("#btnAddCat"), "Creating...");
+      const name = qs("#catName").value;
+      qs("#catMsg").textContent = "";
+      try{
+        await App.api("/api/admin/categories", { method:"POST", body:{ name } });
+        qs("#catMsg").textContent = "Created.";
+        qs("#catName").value = "";
+        await load();
+      }catch(err){
+        qs("#catMsg").textContent = String(err.message||err);
+      }
+      done();
+    });
+
+    await load();
+  }
+
+  async function renderReports(){
+    qs("#page").innerHTML = `
+      <div class="h1">Reports</div>
+      <div class="card">
+        <div class="row" style="gap:.6rem;flex-wrap:wrap;align-items:flex-end">
+          <div style="min-width:160px">
+            <label>Days</label>
+            <input id="repDays" type="number" min="1" max="180" value="30">
+          </div>
+          <button class="primary" id="btnLoadRep">Load</button>
+          <div class="small muted" id="repMsg"></div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:1rem">
+        <div class="h2">Daily summary</div>
+        <div class="tablewrap" style="margin-top:.6rem">
+          <table>
+            <thead><tr>
+              <th>Date</th>
+              <th>Approved</th>
+              <th>Rejected</th>
+              <th>Revenue</th>
+              <th>Cost (known)</th>
+              <th>Profit (known)</th>
+              <th class="hide-sm">Orders</th>
+              <th class="hide-sm">Canceled</th>
+              <th class="hide-sm">Unknown cost</th>
+            </tr></thead>
+            <tbody id="repRows"><tr><td colspan="9" class="small">Load a report…</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    `;
+
+    const fmt = (n)=>Number(n||0).toFixed(4);
+    async function load(){
+      const days = Number(qs("#repDays").value || 30);
+      qs("#repMsg").textContent = "Loading…";
+      const res = await App.api(`/api/admin/reports/daily?days=${encodeURIComponent(days)}`);
+      const rows = qs("#repRows");
+      const data = res.rows || [];
+      const totals = data.reduce((a,r)=>({
+        pa:a.pa+Number(r.payments_approved_amount||0),
+        pr:a.pr+Number(r.payments_rejected_amount||0),
+        rev:a.rev+Number(r.orders_revenue_non_canceled||0),
+        cost:a.cost+Number(r.orders_cost_known||0),
+        prof:a.prof+Number(r.profit_known||0),
+        orders:a.orders+Number(r.non_canceled_orders||0),
+        canceled:a.canceled+Number(r.canceled_orders||0),
+        unknown:a.unknown+Number(r.orders_unknown_cost||0),
+      }), {pa:0,pr:0,rev:0,cost:0,prof:0,orders:0,canceled:0,unknown:0});
+
+      const body = data.map(r=>`
+        <tr>
+          <td>${r.day}</td>
+          <td>${fmt(r.payments_approved_amount)} <span class="small muted">(${r.payments_approved_count||0})</span></td>
+          <td>${fmt(r.payments_rejected_amount)} <span class="small muted">(${r.payments_rejected_count||0})</span></td>
+          <td>${fmt(r.orders_revenue_non_canceled)}</td>
+          <td>${fmt(r.orders_cost_known)}</td>
+          <td>${fmt(r.profit_known)}</td>
+          <td class="hide-sm">${r.non_canceled_orders||0}</td>
+          <td class="hide-sm">${r.canceled_orders||0}</td>
+          <td class="hide-sm">${r.orders_unknown_cost||0}</td>
+        </tr>
+      `).join("");
+
+      rows.innerHTML = body + `
+        <tr>
+          <td><b>Totals</b></td>
+          <td><b>${fmt(totals.pa)}</b></td>
+          <td><b>${fmt(totals.pr)}</b></td>
+          <td><b>${fmt(totals.rev)}</b></td>
+          <td><b>${fmt(totals.cost)}</b></td>
+          <td><b>${fmt(totals.prof)}</b></td>
+          <td class="hide-sm"><b>${totals.orders}</b></td>
+          <td class="hide-sm"><b>${totals.canceled}</b></td>
+          <td class="hide-sm"><b>${totals.unknown}</b></td>
+        </tr>
+      `;
+      qs("#repMsg").textContent = `Since ${res.since} (${res.days} days)`;
+    }
+
+    qs("#btnLoadRep").addEventListener("click", ()=>load().catch(e=>toast(String(e.message||e))));
+  }
+
+  async function renderPayments(){
+    qs("#page").innerHTML = `
+      <div class="h1">Payments</div>
+
+      <div class="card">
+        <div class="small muted">Approve adds funds to the user's balance. Reject marks the request as rejected.</div>
+      </div>
+
+      <div class="card" style="margin-top:1rem">
+        <div class="row" style="justify-content:space-between;gap:.75rem;flex-wrap:wrap">
+          <div class="h2" style="margin:0">Fund requests</div>
+          <button id="btnReloadPay">Reload</button>
+        </div>
+        <div class="tablewrap" style="margin-top:.6rem">
+          <table>
+            <thead><tr>
+              <th>ID</th><th>Date</th><th>User</th><th>Method</th><th>Amount</th><th>Txn</th><th>Status</th><th>Reason</th><th>Actions</th>
+            </tr></thead>
+            <tbody id="payRows"><tr><td colspan="9" class="small">Loading…</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    `;
+
+    async function load(){
+      const res = await App.api("/api/admin/payments");
+      const rows = qs("#payRows");
+      rows.innerHTML = (res.payments||[]).map(p=>{
+        const isPending = p.status === "pending";
+        return `
+          <tr data-id="${p.id}">
+            <td>${p.id}</td>
+            <td class="small">${p.created_at}</td>
+            <td>${p.user_email || p.user_id}</td>
+            <td>${escapeHtml(p.method||"")}</td>
+            <td>${p.amount}</td>
+            <td class="small">${escapeHtml(p.txn_id||"")}</td>
+            <td>${escapeHtml(p.status)}</td>
+            <td class="small">${escapeHtml(p.reason||"")}</td>
+            <td class="row" style="gap:.35rem;justify-content:flex-end;flex-wrap:wrap">
+              ${isPending?`<button class="primary btnApprove">Approve</button><button class="danger btnReject">Reject</button>`:`<span class="small muted">—</span>`}
+            </td>
+          </tr>
+        `;
+      }).join("") || `<tr><td colspan="9" class="small">No records.</td></tr>`;
+
+      qsa(".btnApprove").forEach(btn=>btn.addEventListener("click", async (e)=>{
+        const tr = e.target.closest("tr");
+        const id = Number(tr.dataset.id);
+        const done = App.btnLoading(e.target, "Approving...");
+        try{
+          await App.api("/api/admin/payments/approve", { method:"POST", body:{ id } });
+          toast("Approved");
+          await load();
+        }catch(err){ toast(String(err.message||err)); }
+        done();
+      }));
+
+      qsa(".btnReject").forEach(btn=>btn.addEventListener("click", async (e)=>{
+        const tr = e.target.closest("tr");
+        const id = Number(tr.dataset.id);
+        const reason = prompt("Reject reason (optional):", "") || "";
+        const done = App.btnLoading(e.target, "Rejecting...");
+        try{
+          await App.api("/api/admin/payments/reject", { method:"POST", body:{ id, reason } });
+          toast("Rejected");
+          await load();
+        }catch(err){ toast(String(err.message||err)); }
+        done();
+      }));
+    }
+
+    qs("#btnReloadPay").addEventListener("click", ()=>load());
+    await load();
+  }
+
+  async function renderAppearance(){
+    qs("#page").innerHTML = `
+      <div class="h1">Appearance</div>
+      <div class="card">
+        <div class="row">
+          <div class="col"><label>Primary</label><input id="ui_primary" /></div>
+          <div class="col"><label>Accent</label><input id="ui_accent" /></div>
+        </div>
+        <div class="row" style="margin-top:.75rem;">
+          <div class="col"><label>Background</label><input id="ui_bg" /></div>
+          <div class="col"><label>Surface</label><input id="ui_surface" /></div>
+        </div>
+        <div class="row" style="margin-top:.75rem;">
+          <div class="col"><label>Text</label><input id="ui_text" /></div>
+          <div class="col"><label>Muted</label><input id="ui_muted" /></div>
+        </div>
+        <div class="row" style="margin-top:.75rem;">
+          <div class="col"><label>Border</label><input id="ui_border" /></div>
+        </div>
+        <div class="flex" style="margin-top:1rem;">
+          <button class="primary" id="btnSave" type="button">Save</button>
+          <span class="small">Enter hex colors like #2563eb</span>
+        </div>
+      </div>
+    `;
+    const root = getComputedStyle(document.documentElement);
+    const map = {
+      ui_primary:"--primary", ui_accent:"--accent", ui_bg:"--bg", ui_surface:"--surface",
+      ui_text:"--text", ui_muted:"--muted", ui_border:"--border"
+    };
+    Object.keys(map).forEach(k=>{
+      qs("#"+k).value = root.getPropertyValue(map[k]).trim();
+    });
+
+    qs("#btnSave").addEventListener("click", async ()=>{
+      const btn = qs("#btnSave"); const done = App.btnLoading(btn, "Saving...");
+      try{
+        const body = {};
+        Object.keys(map).forEach(k=>body[k]=qs("#"+k).value.trim());
+        await App.api("/api/admin/settings/appearance",{method:"POST", body});
+        App.toast("Saved");
+        App.setThemeVars(body);
+      }catch(e){ App.toast(e.message); }
+      finally{ done(); }
+    });
+  }
+
+
+  async function renderPassword(){
+    qs("#page").innerHTML = `
+      <div class="h1">Change Password</div>
+      <div class="card" style="max-width:560px;">
+        <div class="row">
+          <div class="col" style="min-width:100%">
+            <label>Old password</label>
+            <input id="oldp" type="password" autocomplete="current-password" />
+          </div>
+          <div class="col" style="min-width:100%">
+            <label>New password (min 6 chars)</label>
+            <input id="newp" type="password" autocomplete="new-password" />
+          </div>
+        </div>
+        <div class="flex" style="margin-top:1rem;">
+          <button class="primary" id="btnPass" type="button">Update</button>
+        </div>
+      </div>
+    `;
+    qs("#btnPass").addEventListener("click", async ()=>{
+      const btn = qs("#btnPass"); const done = App.btnLoading(btn, "Updating...");
+      try{
+        const old_password = qs("#oldp").value;
+        const new_password = qs("#newp").value;
+        await App.api("/api/admin/password",{method:"POST", body:{old_password, new_password}});
+        App.toast("Password updated");
+        qs("#oldp").value=""; qs("#newp").value="";
+      }catch(e){ App.toast(e.message); }
+      finally{ done(); }
+    });
+  }
+
+  async function renderSetApi(){
+    qs("#page").innerHTML = `
+      <div class="h1">Set API</div>
+      <div class="card">
+        <div class="row">
+          <div class="col">
+            <label>API URL (locked)</label>
+            <input value="https://galaxysmm.pk/api/v2" disabled />
+          </div>
+          <div class="col">
+            <label>API Key</label>
+            <input id="k" />
+          </div>
+        </div>
+        <div class="flex" style="margin-top:1rem;">
+          <button class="primary" id="btnSave" type="button">Save</button>
+        </div>
+      </div>
+    `;
+    qs("#btnSave").addEventListener("click", async ()=>{
+      const btn = qs("#btnSave"); const done = App.btnLoading(btn, "Saving...");
+      try{
+        const api_key = qs("#k").value.trim();
+        await App.api("/api/admin/settings/provider",{method:"POST", body:{api_key}});
+        App.toast("Saved");
+      }catch(e){ App.toast(e.message); }
+      finally{ done(); }
+    });
+  }
+
+  await navigate("dashboard");
+})();
+
+</script>
+
+</body></html>

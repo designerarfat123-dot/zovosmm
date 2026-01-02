@@ -1,0 +1,46 @@
+<!doctype html><html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="stylesheet" href="simple.css">
+<script src="config.js"></script>
+<script src="app.js"></script><title>Sign up</title></head><body onload="App.loadPublicTheme()">
+<div class="topbar"><div class="inner">
+  <div class="brand">Your Panel</div>
+  <div class="small">Create Account</div>
+</div></div>
+
+<div class="container">
+  <div class="card" style="max-width:520px;margin:2rem auto;">
+    <div class="h1">Sign up</div>
+    <div class="row">
+      <div class="col" style="min-width:100%">
+        <label>Email</label>
+        <input id="email" type="email" autocomplete="email" />
+      </div>
+      <div class="col" style="min-width:100%">
+        <label>Password (min 6 chars)</label>
+        <input id="password" type="password" autocomplete="new-password" />
+      </div>
+    </div>
+    <div class="flex" style="margin-top:1rem;">
+      <button class="primary" id="btnSignup" type="button">Create account</button>
+      <div class="right small">Already have an account? <a href="login.html">Login</a></div>
+    </div>
+  </div>
+</div>
+<div id="toast" class="toast"></div>
+<script>
+qs("#btnSignup").addEventListener("click", async ()=>{
+  const btn = qs("#btnSignup");
+  const done = App.btnLoading(btn, "Signing up...");
+  try{
+    const email = qs("#email").value.trim();
+    const password = qs("#password").value;
+    await App.api("/api/auth/signup", {method:"POST", auth:false, body:{email,password}});
+    App.toast("Account created. Please login.");
+    setTimeout(()=>location.href="login.html", 700);
+  }catch(e){
+    App.toast(e.message);
+  }finally{ done(); }
+});
+</script>
+</body></html>

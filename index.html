@@ -1,0 +1,15 @@
+<!doctype html><html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="stylesheet" href="simple.css">
+<script src="config.js"></script>
+<script src="app.js"></script><title>Panel</title></head><body>
+<script>
+(async function(){
+  await App.loadPublicTheme();
+  const t = localStorage.getItem("token");
+  if(t) location.replace("panel.html");
+  else location.replace("login.html");
+})();
+</script>
+<div id="toast" class="toast"></div>
+</body></html>
